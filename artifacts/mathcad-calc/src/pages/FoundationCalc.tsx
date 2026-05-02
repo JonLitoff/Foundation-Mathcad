@@ -543,6 +543,12 @@ export default function FoundationCalc() {
           </Row>
         </div>
 
+        <Row indent={1}>
+          <InputVar>φ</InputVar><Assign />
+          <span className="mc-expr">0.9</span>
+          <Cmt>strength reduction factor — tension-controlled flexure (ACI 318-05 §9.3.2.1)</Cmt>
+        </Row>
+
         <div style={{ marginLeft: 24, border: "1px solid #aac8e8", background: "#f4f9ff", padding: "6px 10px", margin: "6px 24px", fontSize: "9.5pt", fontFamily: "'Times New Roman', serif" }}>
           <Row>
             <Var>A<Sub>s,req</Sub></Var><Assign />
