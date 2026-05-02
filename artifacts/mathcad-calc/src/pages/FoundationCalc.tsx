@@ -723,6 +723,16 @@ export default function FoundationCalc() {
 
         <SubHeader>Bolt Length</SubHeader>
         <Row indent={1}>
+          <InputVar>Projection</InputVar><Assign />
+          <span className="mc-expr">1 ft – 2 in</span>
+          <Cmt>bolt projection above top of grout (from vessel data sheet)</Cmt>
+        </Row>
+        <Row indent={1}>
+          <InputVar>P₁</InputVar><Assign />
+          <span className="mc-expr">2</span><Unit>in</Unit>
+          <Cmt>nut/anchor-head thickness allowance (PIP STE05121)</Cmt>
+        </Row>
+        <Row indent={1}>
           <span className="mc-expr">L<Sub>min</Sub> = Projection + h<Sub>ef</Sub> + P₁ = (1 ft – 2 in) + (1 ft – 6 in) + (2 in)</span>
           <Eq /><Res>2 ft – 10 in</Res>
         </Row>
