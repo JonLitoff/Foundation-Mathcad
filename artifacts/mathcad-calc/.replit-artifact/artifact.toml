@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Vertical Vessel Foundation Calculation"
+version = "1.0.0"
+id = "artifacts/mathcad-calc"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21142
+
+[services.development]
+run = "pnpm --filter @workspace/mathcad-calc run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/mathcad-calc", "run", "build" ]
+publicDir = "artifacts/mathcad-calc/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21142"
+BASE_PATH = "/"

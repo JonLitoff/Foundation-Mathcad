@@ -1,0 +1,303 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --font-sans: var(--app-font-sans);
+  --font-serif: var(--app-font-serif);
+  --font-mono: var(--app-font-mono);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+}
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 220 20% 10%;
+  --border: 220 13% 88%;
+  --input: 220 13% 88%;
+  --ring: 213 90% 40%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 20% 10%;
+  --primary: 213 90% 40%;
+  --primary-foreground: 0 0% 100%;
+  --muted: 210 20% 96%;
+  --muted-foreground: 220 10% 45%;
+  --app-font-sans: 'Arial', 'Helvetica Neue', sans-serif;
+  --app-font-serif: 'Times New Roman', Georgia, serif;
+  --app-font-mono: 'Courier New', Courier, monospace;
+  --radius: 2px;
+}
+
+@layer base {
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground; }
+}
+
+/* Mathcad-specific styles */
+.mc-page {
+  background: white;
+  font-family: 'Arial', sans-serif;
+  font-size: 10pt;
+  color: #000;
+}
+
+.mc-worksheet {
+  max-width: 816px;
+  margin: 0 auto;
+  background: white;
+  padding: 60px 72px;
+  min-height: 1056px;
+  position: relative;
+}
+
+.mc-header-bar {
+  background: #1a5fa8;
+  color: white;
+  padding: 4px 8px;
+  font-weight: bold;
+  font-size: 9pt;
+  letter-spacing: 0.03em;
+  margin-bottom: 12px;
+}
+
+.mc-section-header {
+  background: #d0e4f7;
+  border-left: 4px solid #1a5fa8;
+  color: #1a3a6e;
+  padding: 3px 8px;
+  font-weight: bold;
+  font-size: 9.5pt;
+  margin-top: 18px;
+  margin-bottom: 8px;
+}
+
+.mc-subsection-header {
+  color: #1a5fa8;
+  font-weight: bold;
+  font-size: 9pt;
+  border-bottom: 1px solid #c0d8ef;
+  padding-bottom: 2px;
+  margin-top: 14px;
+  margin-bottom: 6px;
+}
+
+.mc-text {
+  font-size: 9pt;
+  color: #222;
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+
+.mc-comment {
+  font-size: 8.5pt;
+  color: #555;
+  font-style: italic;
+  margin-left: 16px;
+  margin-bottom: 4px;
+}
+
+/* Variable definition block */
+.mc-calc-block {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  margin: 3px 0;
+  font-family: 'Times New Roman', serif;
+}
+
+.mc-var {
+  color: #1a3a8f;
+  font-style: italic;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+}
+
+.mc-assign {
+  color: #1a3a8f;
+  font-size: 10pt;
+  margin: 0 4px;
+  font-style: normal;
+}
+
+.mc-expr {
+  color: #000;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+}
+
+.mc-result {
+  color: #1a5fa8;
+  font-weight: bold;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+  border: 1px solid #1a5fa8;
+  background: #eef5fc;
+  padding: 0 6px;
+  margin-left: 6px;
+}
+
+.mc-ok {
+  color: #166316;
+  font-weight: bold;
+  font-size: 9pt;
+  border: 1px solid #166316;
+  background: #edf7ed;
+  padding: 0 5px;
+  margin-left: 6px;
+  font-family: 'Arial', sans-serif;
+}
+
+.mc-unit {
+  color: #444;
+  font-size: 9pt;
+  margin-left: 4px;
+  font-family: 'Arial', sans-serif;
+  font-style: normal;
+}
+
+.mc-equation-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin: 3px 0 3px 0;
+  gap: 4px;
+}
+
+.mc-indent {
+  margin-left: 24px;
+}
+
+.mc-indent2 {
+  margin-left: 48px;
+}
+
+.mc-bullet-result {
+  background: #1a5fa8;
+  color: white;
+  padding: 3px 10px;
+  font-size: 9pt;
+  font-weight: bold;
+  margin: 8px 0 4px 0;
+  display: inline-block;
+}
+
+.mc-note {
+  border-left: 3px solid #f0a000;
+  background: #fffbf0;
+  padding: 4px 8px;
+  font-size: 8.5pt;
+  color: #555;
+  margin: 6px 0;
+}
+
+.mc-ref {
+  color: #777;
+  font-size: 8pt;
+  margin-left: 12px;
+  font-style: italic;
+}
+
+.mc-divider {
+  border: none;
+  border-top: 1px solid #c0d0e0;
+  margin: 14px 0;
+}
+
+.mc-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9pt;
+  margin: 8px 0;
+}
+
+.mc-data-table th {
+  background: #1a5fa8;
+  color: white;
+  padding: 3px 8px;
+  text-align: left;
+  font-weight: bold;
+}
+
+.mc-data-table td {
+  padding: 2px 8px;
+  border-bottom: 1px solid #e0e8f0;
+}
+
+.mc-data-table tr:nth-child(even) td {
+  background: #f4f8fd;
+}
+
+.mc-title-block {
+  border: 2px solid #1a5fa8;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+}
+
+.mc-title {
+  font-size: 14pt;
+  font-weight: bold;
+  color: #1a3a6e;
+  font-family: 'Arial', sans-serif;
+  border-bottom: 2px solid #1a5fa8;
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+}
+
+.mc-subtitle {
+  font-size: 10pt;
+  color: #444;
+}
+
+.mc-meta-table {
+  width: 100%;
+  font-size: 8.5pt;
+  margin-top: 8px;
+}
+.mc-meta-table td {
+  padding: 1px 4px;
+  color: #444;
+}
+.mc-meta-table td:first-child {
+  font-weight: bold;
+  color: #1a3a6e;
+  width: 100px;
+}
+
+.mc-superscript {
+  font-size: 0.7em;
+  vertical-align: super;
+}
+
+.mc-subscript {
+  font-size: 0.75em;
+  vertical-align: sub;
+}
+
+/* Print styles */
+@media print {
+  .mc-worksheet {
+    padding: 40px 56px;
+    max-width: 100%;
+  }
+  .no-print {
+    display: none !important;
+  }
+  @page {
+    margin: 0.5in;
+    size: letter;
+  }
+}
