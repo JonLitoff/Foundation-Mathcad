@@ -119,11 +119,28 @@
   font-family: 'Times New Roman', serif;
 }
 
+.mc-input-var {
+  color: #9a6700;
+  font-style: italic;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+  background: #fffbe8;
+  padding: 0 2px;
+}
+
 .mc-var {
   color: #1a3a8f;
   font-style: italic;
   font-size: 10pt;
   font-family: 'Times New Roman', serif;
+}
+
+.mc-inline-comment {
+  color: #777;
+  font-size: 8pt;
+  margin-left: 14px;
+  font-style: italic;
+  font-family: 'Arial', sans-serif;
 }
 
 .mc-assign {
