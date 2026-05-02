@@ -306,18 +306,29 @@
 
 /* Print styles */
 @media print {
+  /* Nuclear reset — catches min-h-screen, overflow-hidden, position:relative, etc. */
+  * {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
   html, body {
     height: auto !important;
+    min-height: 0 !important;
     overflow: visible !important;
   }
+
   .mc-page {
-    background: white !important;
     height: auto !important;
+    min-height: 0 !important;
     overflow: visible !important;
     padding: 0 !important;
+    background: white !important;
   }
+
   .mc-worksheet {
-    padding: 0 !important;
+    /* Restore readable padding; remove screen-only decorations */
+    padding: 40px 56px !important;
     max-width: 100% !important;
     width: 100% !important;
     min-height: 0 !important;
@@ -325,13 +336,15 @@
     overflow: visible !important;
     position: static !important;
     box-shadow: none !important;
-    margin: 0 !important;
+    margin: 0 auto !important;
   }
+
   .no-print {
     display: none !important;
   }
+
   @page {
-    margin: 0.6in 0.6in 0.6in 0.6in;
+    margin: 0.55in;
     size: letter portrait;
   }
 }
