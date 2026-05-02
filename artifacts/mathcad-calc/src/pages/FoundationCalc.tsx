@@ -1341,6 +1341,12 @@ export default function FoundationCalc() {
         </Row>
 
         <Row indent={1}>
+          <InputVar>b</InputVar><Assign />
+          <span className="mc-expr">12</span><Unit>in</Unit>
+          <Cmt>unit strip width (1 ft)</Cmt>
+        </Row>
+
+        <Row indent={1}>
           <Var>F</Var><Assign />
           <span className="mc-expr">b·d²/12,000 = 12({d_eff.toFixed(3)})²/12,000</span>
           <Eq /><Res>{F_factor.toFixed(3)}</Res>
@@ -1384,10 +1390,10 @@ export default function FoundationCalc() {
         <SubHeader>Beam Shear — Empty + Wind (Controls)</SubHeader>
 
         <Row indent={1}>
-          <InputVar>d/12</InputVar><Assign />
+          <Var>d/12</Var><Assign />
           <span className="mc-expr">{d_eff.toFixed(3)}/12</span>
           <Eq /><Res>{(d_eff / 12).toFixed(2)}</Res><Unit>ft</Unit>
-          <Cmt>effective depth in feet</Cmt>
+          <Cmt>effective depth converted to feet</Cmt>
         </Row>
 
         <Row indent={1}>
@@ -1414,6 +1420,12 @@ export default function FoundationCalc() {
           <Var>v<Sub>u</Sub></Var><Assign />
           <span className="mc-expr">V<Sub>u</Sub>·1000/(b·d) = 11.55(1000)/(12 × {d_eff.toFixed(3)})</span>
           <Eq /><Res>{vu_beam.toFixed(1)}</Res><Unit>psi</Unit>
+        </Row>
+
+        <Row indent={1}>
+          <InputVar>φ</InputVar><Assign />
+          <span className="mc-expr">0.75</span>
+          <Cmt>shear strength reduction factor (ACI 318-05 §9.3.2.3)</Cmt>
         </Row>
 
         <Row indent={1}>
@@ -1461,9 +1473,16 @@ export default function FoundationCalc() {
         </Row>
 
         <Row indent={1}>
+          <Var>SC<Sub>punch</Sub></Var><Assign />
+          <span className="mc-expr">(1.4/1.2)·Soil+Conc.<Sub>op</Sub> = (1.4/1.2)·{SC_op.toFixed(4)}</span>
+          <Eq /><Res>{SC_punch.toFixed(2)}</Res><Unit>ksf</Unit>
+          <Cmt>factored soil+concrete counterweight for test load combination</Cmt>
+        </Row>
+
+        <Row indent={1}>
           <Var>V<Sub>u,punch</Sub></Var><Assign />
           <span className="mc-expr">
-            (P<Sub>u</Sub>/A − factored soil)·(A<Sub>oct</Sub> − (c+d)²)
+            (P<Sub>u</Sub>/A − SC<Sub>punch</Sub>)·(A<Sub>oct</Sub> − (c+d)²)
             = ({(1.4 * Pt / A_oct).toFixed(2)} − {SC_punch.toFixed(2)})({A_oct} − {(side_d * side_d).toFixed(1)})
           </span>
         </Row>
