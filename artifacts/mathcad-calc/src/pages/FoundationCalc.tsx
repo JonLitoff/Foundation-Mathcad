@@ -70,8 +70,8 @@ function octIntegrals(
  *    L       = q_max·A_oct / P  (bearing-pressure coefficient)
  *    K       = (y_n + D/2)/D   (neutral-axis position ratio, 0 when fully compressed)
  *    compLen = length of compression zone from far edge to neutral axis (ft) */
-function solveLK(e: number, D: number, dir: 'flat' | 'diag'): { L: number; K: number; compLen: number } {
-  if (!isFinite(e) || e <= 0) return { L: 1, K: 0, compLen: D };
+function solveLK(e: number, D: number, dir: 'flat' | 'diag'): { L: number; K: number; compLen: number; A_int: number; S_int: number; I2_int: number } {
+  if (!isFinite(e) || e <= 0) return { L: 1, K: 0, compLen: D, A_int: 0, S_int: 0, I2_int: 0 };
   const c8    = Math.cos(Math.PI / 8);
   const y_far = dir === 'flat' ? D / 2 : D / (2 * c8);   // far-edge distance
   const kern  = dir === 'flat' ? 0.132 * D : 0.122 * D;  // kern eccentricity
@@ -80,9 +80,9 @@ function solveLK(e: number, D: number, dir: 'flat' | 'diag'): { L: number; K: nu
 
   if (e <= kern) {
     // Fully compressed — exact closed form: L = 1 + e/kern, K = 0
-    return { L: 1 + e / kern, K: 0, compLen: y_far };
+    return { L: 1 + e / kern, K: 0, compLen: y_far, A_int: 0, S_int: 0, I2_int: 0 };
   }
-  if (e >= y_far * 0.998) return { L: 999, K: 0.98, compLen: D * 0.02 };
+  if (e >= y_far * 0.998) return { L: 999, K: 0.98, compLen: D * 0.02, A_int: 0, S_int: 0, I2_int: 0 };
 
   // Partial uplift — bisect on neutral-axis position y_n
   // e_computed = (I2 − y_n·S) / (S − y_n·A) — increases monotonically with y_n
@@ -97,12 +97,12 @@ function solveLK(e: number, D: number, dir: 'flat' | 'diag'): { L: number; K: nu
     if (ec < e) lo = yn; else hi = yn;
   }
   const yn = (lo + hi) / 2;
-  const { A, S } = octIntegrals(yn, y_far, D, wFn);
+  const { A, S, I2 } = octIntegrals(yn, y_far, D, wFn);
   const den     = S - yn * A;
   const compLen = y_far - yn;
   const L       = Math.abs(den) > 1e-10 ? A_oct * compLen / den : 999;
   const K       = Math.max(0, Math.min(1, 0.5 + yn / D));
-  return { L: Math.max(1, L), K, compLen };
+  return { L: Math.max(1, L), K, compLen, A_int: A, S_int: S, I2_int: I2 };
 }
 
 /* ─── ACI 318-05 Appendix D anchor breakout ──────────────────────── */
@@ -146,27 +146,36 @@ function LKEquations({
   e, D, dir, result, showK = false,
 }: {
   e: number; D: number; dir: 'flat' | 'diag';
-  result: { L: number; K: number; compLen: number };
+  result: { L: number; K: number; compLen: number; A_int: number; S_int: number; I2_int: number };
   showK?: boolean;
 }) {
-  const A_oct_val   = 0.8284 * D * D;
-  const kern        = dir === 'flat' ? 0.132 * D : 0.122 * D;
-  const kernFrac    = dir === 'flat' ? '0.132' : '0.122';
-  const c8          = Math.cos(Math.PI / 8);
-  const y_far       = dir === 'flat' ? D / 2 : D / (2 * c8);
-  const yn          = y_far - result.compLen;
-  const fullyCompr  = e <= kern;
-  const dirLabel    = dir === 'flat' ? 'flat-axis' : 'diagonal-axis';
+  const A_oct_val  = 0.8284 * D * D;
+  const kern       = dir === 'flat' ? 0.132 * D : 0.122 * D;
+  const kernFrac   = dir === 'flat' ? '0.132' : '0.122';
+  const c8         = Math.cos(Math.PI / 8);
+  const y_far      = dir === 'flat' ? D / 2 : D / (2 * c8);
+  const yn         = y_far - result.compLen;
+  const fullyCompr = e <= kern;
+  const dirLabel   = dir === 'flat' ? 'flat-axis' : 'diagonal-axis';
 
-  const S: React.CSSProperties = {
-    display: 'grid', gridTemplateColumns: '70px 16px 1fr',
-    alignItems: 'baseline', gap: '2px 4px', marginBottom: 3,
+  // shorthand aliases for the integrals
+  const Ai  = result.A_int;
+  const Si  = result.S_int;
+  const I2i = result.I2_int;
+  const den = Si - yn * Ai;   // S − y_n·A
+
+  // grid row style — 3-column: label | operator | content
+  const GS: React.CSSProperties = {
+    display: 'grid', gridTemplateColumns: '70px 14px 1fr',
+    alignItems: 'baseline', columnGap: 4, marginBottom: 4,
     fontSize: '8.5pt', fontFamily: 'Consolas, monospace', color: '#111',
   };
-  const lbl  = (t: string) => <span style={{ color: '#1a3a1a', fontStyle: 'italic', fontFamily: 'Georgia,serif' }}>{t}</span>;
-  const op   = (t: string) => <span style={{ color: '#555' }}>{t}</span>;
+  const lbl  = (t: string) => <span style={{ color: '#1a3a1a', fontStyle: 'italic', fontFamily: 'Georgia,serif', gridColumn: '1' }}>{t}</span>;
+  const op   = (t: string) => <span style={{ color: '#666', gridColumn: '2' }}>{t}</span>;
   const expr = (c: React.ReactNode) => <span className="mc-expr" style={{ fontFamily: 'Consolas,monospace' }}>{c}</span>;
-  const res  = (v: number, d = 3) => <span style={{ fontWeight: 700, color: '#145a14', fontSize: '9.5pt' }}>{fmt(v, d)}</span>;
+  const gn   = (v: number, d = 3) => <span style={{ fontWeight: 700, color: '#145a14' }}>{fmt(v, d)}</span>;  // green result
+  const num  = (v: number, d = 3) => <span style={{ fontWeight: 600, color: '#1a3a6a' }}>{fmt(v, d)}</span>; // blue substituted value
+  const cmt  = (t: string) => <span style={{ fontSize: '7.5pt', color: '#777', fontStyle: 'italic', marginLeft: 8 }}>{t}</span>;
 
   return (
     <div style={{
@@ -174,92 +183,176 @@ function LKEquations({
       borderLeft: '3px solid #2a7a2a', paddingLeft: 12,
       background: '#f5fbf5', borderRadius: '0 4px 4px 0',
     }}>
-      {/* kern */}
-      <div style={S}>
+
+      {/* ── kern ── */}
+      <div style={GS}>
         {lbl('kern')}{op(':=')}
-        <span>{expr(<>{kernFrac}·D = {kernFrac}×{D}</>)} = {res(kern)} <span style={{ fontSize: '7.5pt', color: '#555', fontStyle: 'italic', marginLeft: 6 }}>({dirLabel} kern eccentricity)</span></span>
+        <span>{expr(<>{kernFrac}·D</>)} = {expr(<>{kernFrac} × {D}</>)} = {gn(kern, 4)} ft{cmt(`${dirLabel} kern eccentricity`)}</span>
       </div>
 
-      {/* e vs kern */}
-      <div style={S}>
+      {/* ── e vs kern ── */}
+      <div style={GS}>
         {lbl('e')}{op('=')}
         <span>
-          {res(e, 4)} ft &nbsp;
+          {gn(e, 4)} ft &nbsp;
           <span style={{ fontWeight: 700, color: fullyCompr ? '#2a7a2a' : '#b06000' }}>
-            {fullyCompr ? `≤ ${fmt(kern, 3)} ft` : `> ${fmt(kern, 3)} ft`}
-          </span>&nbsp;
-          <span style={{ color: '#555', fontStyle: 'italic', fontSize: '7.5pt' }}>
-            → {fullyCompr ? 'fully compressed — exact formula' : 'partial uplift — numerical bisection'}
+            {fullyCompr ? `≤ ${fmt(kern, 4)} ft` : `> ${fmt(kern, 4)} ft`}
           </span>
+          {cmt(fullyCompr ? 'fully compressed — use exact formula' : 'partial uplift — use numerical bisection')}
         </span>
       </div>
 
       {fullyCompr ? (
-        /* ── Fully compressed: L = 1 + e/kern ── */
-        <div style={S}>
-          {lbl('L')}{op(':=')}
-          <span>
-            {expr(<>1 + e/kern = 1 + {fmt(e, 4)}/{fmt(kern, 3)}</>)}&nbsp;=&nbsp;{res(result.L)}
-            {showK && <span style={{ color: '#555', marginLeft: 16 }}>K := 0 (no uplift)</span>}
-          </span>
-        </div>
+        /* ════ Fully compressed: L = 1 + e/kern ════ */
+        <>
+          <div style={GS}>
+            {lbl('L')}{op(':=')}
+            <span>
+              {expr(<>1 + e / kern</>)}
+              {' = '}{expr(<>1 + {fmt(e, 4)} / {fmt(kern, 4)}</>)}
+              {' = '}{gn(result.L, 4)}
+              {showK && <span style={{ color: '#777', marginLeft: 16 }}>K := 0{cmt('no uplift, kern not exceeded')}</span>}
+            </span>
+          </div>
+        </>
       ) : (
+        /* ════ Partial uplift: bisection + integral derivation ════ */
         <>
           {/* A_oct */}
-          <div style={S}>
+          <div style={GS}>
             {lbl('A_oct')}{op(':=')}
-            <span>{expr(<>0.8284·D² = 0.8284×{D}²</>)} = {res(A_oct_val, 2)} ft²</span>
+            <span>
+              {expr(<>0.8284 · D²</>)} = {expr(<>0.8284 × {D}²</>)} = {gn(A_oct_val, 3)} ft²
+              {cmt('octagon area')}
+            </span>
           </div>
 
           {/* y_far */}
-          <div style={S}>
+          <div style={GS}>
             {lbl('y_far')}{op(':=')}
             <span>
               {dir === 'flat'
-                ? expr(<>D/2 = {D}/2</>)
-                : expr(<>D/(2·cos 22.5°) = {D}/(2×{fmt(c8, 4)})</>)
-              } = {res(y_far, 4)} ft &nbsp;
-              <span style={{ fontSize: '7.5pt', color: '#555', fontStyle: 'italic' }}>far edge from footing center</span>
+                ? <>{expr(<>D / 2</>)} = {expr(<>{D} / 2</>)}</>
+                : <>{expr(<>D / (2 · cos 22.5°)</>)} = {expr(<>{D} / (2 × {fmt(c8, 4)})</>)}</>
+              } = {gn(y_far, 4)} ft{cmt('distance from center to far bearing edge')}
             </span>
           </div>
 
-          {/* bisection result */}
-          <div style={S}>
+          {/* ── bisection ── */}
+          <div style={GS}>
             {lbl('y_n')}{op(':=')}
             <span>
-              {expr(<>bisect: e<sub>computed</sub>(y<sub>n</sub>) = (I₂−y<sub>n</sub>·S)/(S−y<sub>n</sub>·A) = {fmt(e, 4)} ft</>)}
-              &nbsp;→&nbsp;{res(yn, 4)} ft from center
+              bisect on {expr(<>(I₂ − y<sub>n</sub>·S) / (S − y<sub>n</sub>·A) = e = {fmt(e, 4)} ft</>)}
+              {' '}{cmt('64-iteration bisection, 300-strip numerical integration')}
+            </span>
+          </div>
+          <div style={{ ...GS, marginBottom: 10 }}>
+            <span /><span />
+            <span>
+              → {expr(<>y<sub>n</sub></>)} = {gn(yn, 4)} ft from footing center
+              {cmt(`(${yn < 0 ? 'below' : 'above'} center — compression zone on high-pressure side)`)}
             </span>
           </div>
 
-          {/* compression zone */}
-          <div style={S}>
+          {/* ── Integrals at solution y_n ── */}
+          <div style={{ fontSize: '7.5pt', color: '#555', fontStyle: 'italic', marginBottom: 3, marginLeft: 70 }}>
+            Numerical integrals over compressed zone [{expr(<>y<sub>n</sub></>)} = {fmt(yn, 4)} ft to y<sub>far</sub> = {fmt(y_far, 4)} ft], 300 strips:
+          </div>
+
+          <div style={GS}>
+            {lbl('A')}{op(':=')}
+            <span>
+              {expr(<>∫ w(y) dy</>)}
+              {' = '}{gn(Ai, 4)} ft²
+              {cmt('area of compressed zone')}
+            </span>
+          </div>
+
+          <div style={GS}>
+            {lbl('S')}{op(':=')}
+            <span>
+              {expr(<>∫ w(y)·y dy</>)}
+              {' = '}{gn(Si, 4)} ft³
+              {cmt('first moment of compressed zone about center')}
+            </span>
+          </div>
+
+          <div style={GS}>
+            {lbl('I₂')}{op(':=')}
+            <span>
+              {expr(<>∫ w(y)·y² dy</>)}
+              {' = '}{gn(I2i, 4)} ft⁴
+              {cmt('second moment of compressed zone about center')}
+            </span>
+          </div>
+
+          {/* ── e_check verification ── */}
+          <div style={{ fontSize: '7.5pt', color: '#555', fontStyle: 'italic', margin: '6px 0 3px 70px' }}>
+            Verification — plug y<sub>n</sub> back into eccentricity formula:
+          </div>
+
+          <div style={GS}>
+            {lbl('e_check')}{op(':=')}
+            <span>{expr(<>(I₂ − y<sub>n</sub>·S) / (S − y<sub>n</sub>·A)</>)}</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '70px 14px 1fr', columnGap: 4, marginBottom: 2, fontSize: '8.5pt', fontFamily: 'Consolas, monospace' }}>
+            <span /><span />
+            <span>= ({num(I2i, 4)} − {num(yn, 4)}·{num(Si, 4)}) / ({num(Si, 4)} − {num(yn, 4)}·{num(Ai, 4)})</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '70px 14px 1fr', columnGap: 4, marginBottom: 2, fontSize: '8.5pt', fontFamily: 'Consolas, monospace' }}>
+            <span /><span />
+            <span>= ({num(I2i, 4)} − {num(yn * Si, 4)}) / ({num(Si, 4)} − {num(yn * Ai, 4)})</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '70px 14px 1fr', columnGap: 4, marginBottom: 2, fontSize: '8.5pt', fontFamily: 'Consolas, monospace' }}>
+            <span /><span />
+            <span>= {num(I2i - yn * Si, 4)} / {num(den, 4)}</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '70px 14px 1fr', columnGap: 4, marginBottom: 8, fontSize: '8.5pt', fontFamily: 'Consolas, monospace' }}>
+            <span /><span />
+            <span>
+              = {gn((I2i - yn * Si) / den, 4)} ft &nbsp;
+              <span style={{ color: '#2a7a2a', fontWeight: 700 }}>✓</span>
+              {cmt(`converged to e = ${fmt(e, 4)} ft`)}
+            </span>
+          </div>
+
+          {/* ── Compression zone ── */}
+          <div style={GS}>
             {lbl('c')}{op(':=')}
             <span>
-              {expr(<>y<sub>far</sub> − y<sub>n</sub> = {fmt(y_far, 4)} − ({fmt(yn, 4)})</>)}
-              &nbsp;=&nbsp;{res(result.compLen, 3)} ft &nbsp;
-              <span style={{ fontSize: '7.5pt', color: '#555', fontStyle: 'italic' }}>compression zone length</span>
+              {expr(<>y<sub>far</sub> − y<sub>n</sub></>)}
+              {' = '}{expr(<>{fmt(y_far, 4)} − ({fmt(yn, 4)})</>)}
+              {' = '}{gn(result.compLen, 4)} ft
+              {cmt('compression zone length')}
             </span>
           </div>
 
-          {/* L */}
-          <div style={S}>
+          {/* ── L final ── */}
+          <div style={GS}>
             {lbl('L')}{op(':=')}
-            <span>
-              {expr(<>A<sub>oct</sub>·c / (S−y<sub>n</sub>·A) = {fmt(A_oct_val, 2)}·{fmt(result.compLen, 3)} / (S−y<sub>n</sub>·A)</>)}
-              &nbsp;=&nbsp;{res(result.L)}
-            </span>
+            <span>{expr(<>A<sub>oct</sub> · c / (S − y<sub>n</sub>·A)</>)}</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '70px 14px 1fr', columnGap: 4, marginBottom: 2, fontSize: '8.5pt', fontFamily: 'Consolas, monospace' }}>
+            <span /><span />
+            <span>= {num(A_oct_val, 3)} × {num(result.compLen, 4)} / {num(den, 4)}</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '70px 14px 1fr', columnGap: 4, marginBottom: 8, fontSize: '8.5pt', fontFamily: 'Consolas, monospace' }}>
+            <span /><span />
+            <span>= {num(A_oct_val * result.compLen, 3)} / {num(den, 4)} = {gn(result.L, 4)}</span>
           </div>
 
-          {/* K (strength cases only) */}
+          {/* ── K (strength cases) ── */}
           {showK && (
-            <div style={S}>
-              {lbl('K')}{op(':=')}
-              <span>
-                {expr(<>0.5 + y<sub>n</sub>/D = 0.5 + ({fmt(yn, 4)})/{D}</>)}
-                &nbsp;=&nbsp;{res(result.K)}
-              </span>
-            </div>
+            <>
+              <div style={GS}>
+                {lbl('K')}{op(':=')}
+                <span>{expr(<>0.5 + y<sub>n</sub> / D</>)}</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '70px 14px 1fr', columnGap: 4, marginBottom: 4, fontSize: '8.5pt', fontFamily: 'Consolas, monospace' }}>
+                <span /><span />
+                <span>= 0.5 + ({num(yn, 4)}) / {D} = {gn(result.K, 4)}</span>
+              </div>
+            </>
           )}
         </>
       )}
