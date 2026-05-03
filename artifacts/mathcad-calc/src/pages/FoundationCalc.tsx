@@ -7,6 +7,18 @@ function fmt(n: number, d = 2): string {
   return n.toFixed(d);
 }
 
+/** Convert decimal feet to "X ft – Y in" with ⅛-inch fractions */
+function fmtFtIn(decFt: number): string {
+  if (!isFinite(decFt) || isNaN(decFt)) return "—";
+  const totalEighths = Math.round(decFt * 12 * 8);
+  const ft  = Math.floor(totalEighths / 96);
+  const rem = totalEighths % 96;
+  const inW = Math.floor(rem / 8);
+  const frc = rem % 8;
+  const fracStr: Record<number, string> = { 0:'', 1:'⅛', 2:'¼', 3:'⅜', 4:'½', 5:'⅝', 6:'¾', 7:'⅞' };
+  return `${ft} ft\u2013${inW}${fracStr[frc] ?? ''} in`;
+}
+
 /* ─── layout & style components ──────────────────────────────── */
 function InputVar({ children }: { children: React.ReactNode }) {
   return <span className="mc-input-var">{children}</span>;
@@ -382,49 +394,155 @@ export default function FoundationCalc() {
         <SectionHeader>VESSEL GEOMETRY &amp; DESIGN DATA</SectionHeader>
 
         <div style={{ display: "flex", gap: 32, marginBottom: 12, flexWrap: "wrap" }}>
-          {/* Left – sketch */}
-          <div style={{ flex: "0 0 220px" }}>
-            <svg viewBox="0 0 220 370" style={{ width: 220, height: 370, fontFamily: "Arial", fontSize: 9 }}>
-              <line x1="10" y1="280" x2="210" y2="280" stroke="#888" strokeDasharray="4,3" strokeWidth={1} />
-              <text x="155" y="292" fill="#555" fontSize="8">Grade El. 100 ft</text>
-              <rect x="30" y="295" width="160" height="22" fill="#d9e8d9" stroke="#4a7a4a" strokeWidth={1.2} />
-              <rect x="65" y="235" width="90" height="62" fill="#cce0cc" stroke="#4a7a4a" strokeWidth={1.2} />
-              <rect x="82" y="55" width="56" height="182" fill="none" stroke="#333" strokeWidth={1.5} />
-              <ellipse cx="110" cy="55" rx="28" ry="8" fill="none" stroke="#333" strokeWidth={1.2} />
-              <rect x="76" y="190" width="68" height="47" fill="none" stroke="#555" strokeWidth={1} strokeDasharray="3,2" />
-              <rect x="55" y="217" width="110" height="4" fill="#aaa" />
-              <text x="168" y="222" fill="#444" fontSize="8">Platf. #1 (90°)</text>
-              <rect x="55" y="160" width="110" height="4" fill="#aaa" />
-              <text x="168" y="165" fill="#444" fontSize="8">Platf. #2 (60°)</text>
-              <rect x="55" y="100" width="110" height="4" fill="#aaa" />
-              <text x="168" y="105" fill="#444" fontSize="8">Platf. #3 (12 ft dia)</text>
-              <rect x="79" y="57" width="62" height="180" fill="none" stroke="#b09060" strokeWidth={0.8} strokeDasharray="2,2" />
-              <defs>
-                <marker id="arrow" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
-                  <path d="M0,0 L6,3 L0,6 Z" fill="#1a5fa8" />
-                </marker>
-              </defs>
-              <line x1="12" y1="140" x2="76" y2="140" stroke="#1a5fa8" strokeWidth={1.5} markerEnd="url(#arrow)" />
-              <text x="5" y="136" fill="#1a5fa8" fontSize="8" fontWeight="bold">W</text>
-              <line x1="20" y1="55" x2="20" y2="237" stroke="#666" strokeWidth={0.7} markerEnd="url(#arrow)" />
-              <line x1="20" y1="237" x2="20" y2="55" stroke="#666" strokeWidth={0.7} />
-              <text x="3" y="150" fill="#444" fontSize="8" transform="rotate(-90,3,150)">67 ft</text>
-              <text x="168" y="80" fill="#444" fontSize="8">49 ft</text>
-              <line x1="164" y1="55" x2="164" y2="160" stroke="#888" strokeWidth={0.5} strokeDasharray="2,2" />
-              <text x="168" y="195" fill="#444" fontSize="8">23 ft</text>
-              <line x1="164" y1="160" x2="164" y2="235" stroke="#888" strokeWidth={0.5} strokeDasharray="2,2" />
-              <text x="15" y="273" fill="#555" fontSize="8">4.5 ft</text>
-              <text x="15" y="308" fill="#555" fontSize="8">1.5 ft</text>
-              <line x1="65" y1="245" x2="155" y2="245" stroke="#e06020" strokeWidth={0.8} />
-              <text x="85" y="258" fill="#e06020" fontSize="7.5">17 ft-8½ in</text>
-              <line x1="30" y1="310" x2="190" y2="310" stroke="#1a5fa8" strokeWidth={0.8} />
-              <text x="65" y="325" fill="#1a5fa8" fontSize="7.5">21 ft-8¾ in</text>
-              <text x="132" y="130" fill="#555" fontSize="7">⁹⁄₁₆ in</text>
-              <text x="5" y="55" fill="#333" fontSize="7">4 in dia pipe</text>
-              <text x="5" y="63" fill="#333" fontSize="7">1½ in insul.</text>
-              <text x="60" y="72" fill="#333" fontSize="7.5">14 ft dia.</text>
-              <text x="62" y="82" fill="#555" fontSize="7">(14.42 ft)</text>
-            </svg>
+          {/* Left – sketch (dynamic) */}
+          <div style={{ flex: "0 0 230px" }}>
+            {(() => {
+              /* ── layout constants ── */
+              const cx         = 115;   // SVG horizontal centre
+              const pedTopY    = 235;   // fixed: vessel base / pedestal top
+              const availPx    = 108;   // pixels for h_ped + t_ftg combined
+              const totalFndFt = Math.max(h_ped + t_ftg, 0.5);
+              const hSc        = availPx / totalFndFt;   // px per foot
+
+              const pedH_px  = h_ped * hSc;
+              const ftgH_px  = t_ftg * hSc;
+              const pedBotY  = pedTopY + pedH_px;
+              const ftgBotY  = pedBotY + ftgH_px;
+
+              /* Grade line: aboveGrade = h_ped − (depth_ftg − t_ftg) */
+              const aboveGrade = Math.max(h_ped - (depth_ftg - t_ftg), 0);
+              const gradeY     = pedTopY + aboveGrade * hSc;
+
+              /* Widths (footing = reference 160 px = D_oct) */
+              const ftgW  = 160;
+              const pedW  = Math.max(Math.round(ftgW * (D_ped / D_oct)), 52);
+              const bcW   = Math.min(ftgW * (BC_ft / D_oct), ftgW - 2);
+              const ftgX  = cx - ftgW / 2;
+              const pedX  = cx - pedW / 2;
+              const bcX   = cx - bcW / 2;
+
+              /* dim-line tick half-length */
+              const tk = 4;
+
+              const svgH = Math.max(ftgBotY + 28, 370);
+
+              return (
+                <svg viewBox={`0 0 230 ${svgH}`}
+                     style={{ width: 230, height: svgH, fontFamily: "Arial", fontSize: 9 }}>
+
+                  {/* ── Fixed vessel section ── */}
+                  <defs>
+                    <marker id="arr" markerWidth="5" markerHeight="5" refX="2.5" refY="2.5" orient="auto">
+                      <path d="M0,0 L5,2.5 L0,5 Z" fill="#1a5fa8" />
+                    </marker>
+                  </defs>
+
+                  {/* vessel cylinder */}
+                  <rect x="87" y="55" width="56" height="180" fill="none" stroke="#333" strokeWidth={1.5} />
+                  <ellipse cx={cx} cy="55" rx="28" ry="8" fill="none" stroke="#333" strokeWidth={1.2} />
+
+                  {/* skirt / base ring */}
+                  <rect x="81" y="190" width="68" height="45" fill="none" stroke="#555" strokeWidth={1} strokeDasharray="3,2" />
+
+                  {/* platforms */}
+                  <rect x="58" y="215" width="114" height="4" fill="#bbb" />
+                  <text x="174" y="220" fill="#444" fontSize="7.5">Platf. #1 (90°)</text>
+                  <rect x="58" y="162" width="114" height="4" fill="#bbb" />
+                  <text x="174" y="167" fill="#444" fontSize="7.5">Platf. #2 (60°)</text>
+                  <rect x="58" y="102" width="114" height="4" fill="#bbb" />
+                  <text x="174" y="107" fill="#444" fontSize="7.5">Platf. #3 (12 ft)</text>
+
+                  {/* height annotation lines */}
+                  <line x1="170" y1="55"  x2="170" y2="162" stroke="#888" strokeWidth={0.5} strokeDasharray="2,2" />
+                  <text x="172" y="113"   fill="#555" fontSize="7.5">49 ft</text>
+                  <line x1="170" y1="162" x2="170" y2="235" stroke="#888" strokeWidth={0.5} strokeDasharray="2,2" />
+                  <text x="172" y="202"   fill="#555" fontSize="7.5">23 ft</text>
+
+                  {/* overall height arrow */}
+                  <line x1="22" y1="55" x2="22" y2={pedTopY} stroke="#666" strokeWidth={0.7} markerEnd="url(#arr)" />
+                  <line x1="22" y1={pedTopY} x2="22" y2="55" stroke="#666" strokeWidth={0.7} />
+                  <text x="5" y="152" fill="#444" fontSize="7.5" transform="rotate(-90,5,152)">67 ft</text>
+
+                  {/* wind arrow */}
+                  <line x1="14" y1="140" x2="79" y2="140" stroke="#1a5fa8" strokeWidth={1.5} markerEnd="url(#arr)" />
+                  <text x="7" y="136" fill="#1a5fa8" fontSize="8" fontWeight="bold">W</text>
+
+                  {/* vessel info */}
+                  <text x="62"  y="72"  fill="#333" fontSize="7.5">14 ft dia.</text>
+                  <text x="64"  y="82"  fill="#555" fontSize="7">(14.42 ft)</text>
+
+                  {/* ── Dynamic foundation section ── */}
+
+                  {/* Grade line */}
+                  <line x1="5"  y1={gradeY} x2="220" y2={gradeY}
+                        stroke="#888" strokeDasharray="4,3" strokeWidth={1} />
+                  <text x={cx + 38} y={gradeY - 3} fill="#555" fontSize="7.5">Grade El. 100 ft</text>
+
+                  {/* Footing rectangle */}
+                  <rect x={ftgX} y={pedBotY} width={ftgW} height={ftgH_px}
+                        fill="#d9e8d9" stroke="#4a7a4a" strokeWidth={1.2} />
+
+                  {/* Pedestal rectangle */}
+                  <rect x={pedX} y={pedTopY} width={pedW} height={pedH_px}
+                        fill="#cce0cc" stroke="#4a7a4a" strokeWidth={1.2} />
+
+                  {/* Bolt-circle dashed indicator */}
+                  <line x1={bcX} y1={pedTopY + 6} x2={bcX + bcW} y2={pedTopY + 6}
+                        stroke="#b08040" strokeDasharray="3,2" strokeWidth={1} />
+                  <text x={cx} y={pedTopY + 16} fill="#9a6000" fontSize="7" textAnchor="middle">
+                    BC = {fmt(BC_in, 0)} in
+                  </text>
+
+                  {/* ── h_ped dimension line (left of pedestal) ── */}
+                  <line x1={pedX - 14} y1={pedTopY} x2={pedX - 10} y2={pedTopY}
+                        stroke="#556" strokeWidth={0.8} />
+                  <line x1={pedX - 12} y1={pedTopY} x2={pedX - 12} y2={pedBotY}
+                        stroke="#556" strokeWidth={0.8} />
+                  <line x1={pedX - 14} y1={pedBotY} x2={pedX - 10} y2={pedBotY}
+                        stroke="#556" strokeWidth={0.8} />
+                  <text x={pedX - 15} y={(pedTopY + pedBotY) / 2 + 3}
+                        fill="#444" fontSize="7.5" textAnchor="end">
+                    {fmt(h_ped, 1)} ft
+                  </text>
+
+                  {/* ── t_ftg dimension line (left of footing) ── */}
+                  <line x1={ftgX - 14} y1={pedBotY} x2={ftgX - 10} y2={pedBotY}
+                        stroke="#556" strokeWidth={0.8} />
+                  <line x1={ftgX - 12} y1={pedBotY} x2={ftgX - 12} y2={ftgBotY}
+                        stroke="#556" strokeWidth={0.8} />
+                  <line x1={ftgX - 14} y1={ftgBotY} x2={ftgX - 10} y2={ftgBotY}
+                        stroke="#556" strokeWidth={0.8} />
+                  <text x={ftgX - 15} y={(pedBotY + ftgBotY) / 2 + 3}
+                        fill="#444" fontSize="7.5" textAnchor="end">
+                    {fmt(t_ftg, 1)} ft
+                  </text>
+
+                  {/* ── D_ped dimension line (inside pedestal, near bottom) ── */}
+                  <line x1={pedX}        y1={pedBotY - 10} x2={pedX}        y2={pedBotY - 10 + tk}
+                        stroke="#e06020" strokeWidth={0.8} />
+                  <line x1={pedX}        y1={pedBotY - 10 + tk / 2}
+                        x2={pedX + pedW}  y2={pedBotY - 10 + tk / 2}
+                        stroke="#e06020" strokeWidth={0.8} />
+                  <line x1={pedX + pedW} y1={pedBotY - 10} x2={pedX + pedW} y2={pedBotY - 10 + tk}
+                        stroke="#e06020" strokeWidth={0.8} />
+                  <text x={cx} y={pedBotY - 2} fill="#e06020" fontSize="7.5" textAnchor="middle">
+                    {fmtFtIn(D_ped)}
+                  </text>
+
+                  {/* ── D_oct dimension line (below footing) ── */}
+                  <line x1={ftgX}        y1={ftgBotY + 5} x2={ftgX}        y2={ftgBotY + 5 + tk}
+                        stroke="#1a5fa8" strokeWidth={0.8} />
+                  <line x1={ftgX}        y1={ftgBotY + 5 + tk / 2}
+                        x2={ftgX + ftgW}  y2={ftgBotY + 5 + tk / 2}
+                        stroke="#1a5fa8" strokeWidth={0.8} />
+                  <line x1={ftgX + ftgW} y1={ftgBotY + 5} x2={ftgX + ftgW} y2={ftgBotY + 5 + tk}
+                        stroke="#1a5fa8" strokeWidth={0.8} />
+                  <text x={cx} y={ftgBotY + 18} fill="#1a5fa8" fontSize="7.5" textAnchor="middle">
+                    {fmtFtIn(D_oct)}
+                  </text>
+                </svg>
+              );
+            })()}
           </div>
 
           {/* Right – input variable definitions */}
