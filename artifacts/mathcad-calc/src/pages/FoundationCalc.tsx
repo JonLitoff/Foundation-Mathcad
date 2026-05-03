@@ -140,6 +140,133 @@ function CalcVal({ v, dec = 3 }: { v: number; dec?: number }) {
   );
 }
 
+/** Full step-by-step derivation of L (and optionally K) for one load case.
+ *  Rendered only when useCalcL is true. */
+function LKEquations({
+  e, D, dir, result, showK = false,
+}: {
+  e: number; D: number; dir: 'flat' | 'diag';
+  result: { L: number; K: number; compLen: number };
+  showK?: boolean;
+}) {
+  const A_oct_val   = 0.8284 * D * D;
+  const kern        = dir === 'flat' ? 0.132 * D : 0.122 * D;
+  const kernFrac    = dir === 'flat' ? '0.132' : '0.122';
+  const c8          = Math.cos(Math.PI / 8);
+  const y_far       = dir === 'flat' ? D / 2 : D / (2 * c8);
+  const yn          = y_far - result.compLen;
+  const fullyCompr  = e <= kern;
+  const dirLabel    = dir === 'flat' ? 'flat-axis' : 'diagonal-axis';
+
+  const S: React.CSSProperties = {
+    display: 'grid', gridTemplateColumns: '70px 16px 1fr',
+    alignItems: 'baseline', gap: '2px 4px', marginBottom: 3,
+    fontSize: '8.5pt', fontFamily: 'Consolas, monospace', color: '#111',
+  };
+  const lbl  = (t: string) => <span style={{ color: '#1a3a1a', fontStyle: 'italic', fontFamily: 'Georgia,serif' }}>{t}</span>;
+  const op   = (t: string) => <span style={{ color: '#555' }}>{t}</span>;
+  const expr = (c: React.ReactNode) => <span className="mc-expr" style={{ fontFamily: 'Consolas,monospace' }}>{c}</span>;
+  const res  = (v: number, d = 3) => <span style={{ fontWeight: 700, color: '#145a14', fontSize: '9.5pt' }}>{fmt(v, d)}</span>;
+
+  return (
+    <div style={{
+      marginLeft: 48, marginTop: 2, marginBottom: 8,
+      borderLeft: '3px solid #2a7a2a', paddingLeft: 12,
+      background: '#f5fbf5', borderRadius: '0 4px 4px 0',
+    }}>
+      {/* kern */}
+      <div style={S}>
+        {lbl('kern')}{op(':=')}
+        <span>{expr(<>{kernFrac}·D = {kernFrac}×{D}</>)} = {res(kern)} <span style={{ fontSize: '7.5pt', color: '#555', fontStyle: 'italic', marginLeft: 6 }}>({dirLabel} kern eccentricity)</span></span>
+      </div>
+
+      {/* e vs kern */}
+      <div style={S}>
+        {lbl('e')}{op('=')}
+        <span>
+          {res(e, 4)} ft &nbsp;
+          <span style={{ fontWeight: 700, color: fullyCompr ? '#2a7a2a' : '#b06000' }}>
+            {fullyCompr ? `≤ ${fmt(kern, 3)} ft` : `> ${fmt(kern, 3)} ft`}
+          </span>&nbsp;
+          <span style={{ color: '#555', fontStyle: 'italic', fontSize: '7.5pt' }}>
+            → {fullyCompr ? 'fully compressed — exact formula' : 'partial uplift — numerical bisection'}
+          </span>
+        </span>
+      </div>
+
+      {fullyCompr ? (
+        /* ── Fully compressed: L = 1 + e/kern ── */
+        <div style={S}>
+          {lbl('L')}{op(':=')}
+          <span>
+            {expr(<>1 + e/kern = 1 + {fmt(e, 4)}/{fmt(kern, 3)}</>)}&nbsp;=&nbsp;{res(result.L)}
+            {showK && <span style={{ color: '#555', marginLeft: 16 }}>K := 0 (no uplift)</span>}
+          </span>
+        </div>
+      ) : (
+        <>
+          {/* A_oct */}
+          <div style={S}>
+            {lbl('A_oct')}{op(':=')}
+            <span>{expr(<>0.8284·D² = 0.8284×{D}²</>)} = {res(A_oct_val, 2)} ft²</span>
+          </div>
+
+          {/* y_far */}
+          <div style={S}>
+            {lbl('y_far')}{op(':=')}
+            <span>
+              {dir === 'flat'
+                ? expr(<>D/2 = {D}/2</>)
+                : expr(<>D/(2·cos 22.5°) = {D}/(2×{fmt(c8, 4)})</>)
+              } = {res(y_far, 4)} ft &nbsp;
+              <span style={{ fontSize: '7.5pt', color: '#555', fontStyle: 'italic' }}>far edge from footing center</span>
+            </span>
+          </div>
+
+          {/* bisection result */}
+          <div style={S}>
+            {lbl('y_n')}{op(':=')}
+            <span>
+              {expr(<>bisect: e<sub>computed</sub>(y<sub>n</sub>) = (I₂−y<sub>n</sub>·S)/(S−y<sub>n</sub>·A) = {fmt(e, 4)} ft</>)}
+              &nbsp;→&nbsp;{res(yn, 4)} ft from center
+            </span>
+          </div>
+
+          {/* compression zone */}
+          <div style={S}>
+            {lbl('c')}{op(':=')}
+            <span>
+              {expr(<>y<sub>far</sub> − y<sub>n</sub> = {fmt(y_far, 4)} − ({fmt(yn, 4)})</>)}
+              &nbsp;=&nbsp;{res(result.compLen, 3)} ft &nbsp;
+              <span style={{ fontSize: '7.5pt', color: '#555', fontStyle: 'italic' }}>compression zone length</span>
+            </span>
+          </div>
+
+          {/* L */}
+          <div style={S}>
+            {lbl('L')}{op(':=')}
+            <span>
+              {expr(<>A<sub>oct</sub>·c / (S−y<sub>n</sub>·A) = {fmt(A_oct_val, 2)}·{fmt(result.compLen, 3)} / (S−y<sub>n</sub>·A)</>)}
+              &nbsp;=&nbsp;{res(result.L)}
+            </span>
+          </div>
+
+          {/* K (strength cases only) */}
+          {showK && (
+            <div style={S}>
+              {lbl('K')}{op(':=')}
+              <span>
+                {expr(<>0.5 + y<sub>n</sub>/D = 0.5 + ({fmt(yn, 4)})/{D}</>)}
+                &nbsp;=&nbsp;{res(result.K)}
+              </span>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /** Toggle button — switches between equation-auto and manual-chart modes */
 function CalcToggle({ useCalc, onToggle, label }: {
   useCalc: boolean; onToggle: () => void; label: string;
@@ -1390,10 +1517,11 @@ export default function FoundationCalc() {
         <Row indent={1}>
           {useCalcL ? <Var>L</Var> : <InputVar>L</InputVar>}<Assign />
           {useCalcL
-            ? <><CalcVal v={lk_emp_calc.L} /><Cmt>⚡ octagon bisection — {eD_emp > 0.122 ? 'partial uplift' : 'fully compressed'}, e/D = {fmt(eD_emp,3)}</Cmt></>
+            ? <CalcVal v={lk_emp_calc.L} />
             : <><N value={L_emp_diag} set={setL_emp_diag} w={55} /><Ref>coefficient from Figure B, PIP STE03350 (e/D = {fmt(eD_emp,3)})</Ref></>
           }
         </Row>
+        {useCalcL && <LKEquations e={e_emp} D={D_oct} dir="diag" result={lk_emp_calc} />}
         <Row indent={1}>
           <Var>f</Var><Assign />
           <span className="mc-expr">L·P/A = {fmt(L_emp_u,3)}({fmt(Pe,1)})/{A_oct}</span>
@@ -1428,10 +1556,11 @@ export default function FoundationCalc() {
         <Row indent={1}>
           {useCalcL ? <Var>L</Var> : <InputVar>L</InputVar>}<Assign />
           {useCalcL
-            ? <><CalcVal v={lk_op_calc.L} /><Cmt>⚡ octagon bisection — {eD_op > 0.122 ? 'partial uplift' : 'fully compressed'}, e/D = {fmt(eD_op,3)}</Cmt></>
+            ? <CalcVal v={lk_op_calc.L} />
             : <><N value={L_op_diag} set={setL_op_diag} w={55} /><Ref>Figure B (e/D = {fmt(eD_op,3)})</Ref></>
           }
         </Row>
+        {useCalcL && <LKEquations e={e_op} D={D_oct} dir="diag" result={lk_op_calc} />}
         <Row indent={1}>
           <Var>f</Var><Assign />
           <span className="mc-expr">L·P<Sub>o</Sub>/A<Sub>oct</Sub> = {fmt(L_op_u,3)}({fmt(Po,1)})/{A_oct}</span>
@@ -1521,14 +1650,15 @@ export default function FoundationCalc() {
         <Row indent={1}>
           {useCalcL ? <Var>L</Var> : <InputVar>L</InputVar>}<Assign />
           {useCalcL
-            ? <><CalcVal v={lk_s_op_calc.L} dec={3} /></>
+            ? <CalcVal v={lk_s_op_calc.L} dec={3} />
             : <N value={L_str_op} set={setL_str_op} w={55} />}
           <span style={{ marginLeft: 16 }}>{useCalcL ? <Var>K</Var> : <InputVar>K</InputVar>}<Assign />
           {useCalcL
-            ? <><CalcVal v={lk_s_op_calc.K} dec={3} /><Cmt>⚡ octagon bisection — flat, e/D = {fmt(eD_str_op,3)}</Cmt></>
+            ? <CalcVal v={lk_s_op_calc.K} dec={3} />
             : <><N value={K_str_op} set={setK_str_op} w={60} /><Ref>(flat, Table 2 / Figure B, e/D = {fmt(eD_str_op,3)})</Ref></>}
           </span>
         </Row>
+        {useCalcL && <LKEquations e={e_str_op} D={D_oct} dir="flat" result={lk_s_op_calc} showK />}
         <Row indent={1}>
           <Var>KD</Var><Assign />
           <span className="mc-expr">K × D<Sub>oct</Sub> = {fmt(K_sop_u,3)} × {D_oct}</span>
@@ -1645,14 +1775,15 @@ export default function FoundationCalc() {
         <Row indent={1}>
           {useCalcL ? <Var>L</Var> : <InputVar>L</InputVar>}<Assign />
           {useCalcL
-            ? <><CalcVal v={lk_s_em_calc.L} dec={3} /></>
+            ? <CalcVal v={lk_s_em_calc.L} dec={3} />
             : <N value={L_str_emp} set={setL_str_emp} w={55} />}
           <span style={{ marginLeft: 16 }}>{useCalcL ? <Var>K</Var> : <InputVar>K</InputVar>}<Assign />
           {useCalcL
-            ? <><CalcVal v={lk_s_em_calc.K} dec={3} /><Cmt>⚡ octagon bisection — flat, e/D = {fmt(eD_str_emp,3)}</Cmt></>
+            ? <CalcVal v={lk_s_em_calc.K} dec={3} />
             : <><N value={K_str_emp} set={setK_str_emp} w={60} /><Ref>(flat, Table 2, e/D = {fmt(eD_str_emp,3)})</Ref></>}
           </span>
         </Row>
+        {useCalcL && <LKEquations e={e_str_emp} D={D_oct} dir="flat" result={lk_s_em_calc} showK />}
         <Row indent={1}>
           <Var>KD</Var><Assign />
           <span className="mc-expr">K × D<Sub>oct</Sub> = {fmt(K_sem_u,3)} × {D_oct}</span>
