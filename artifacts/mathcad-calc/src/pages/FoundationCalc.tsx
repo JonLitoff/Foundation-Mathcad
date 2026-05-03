@@ -19,6 +19,152 @@ function fmtFtIn(decFt: number): string {
   return `${ft} ft\u2013${inW}${fracStr[frc] ?? ''} in`;
 }
 
+/* ─── Octagon bearing pressure solver ────────────────────────────
+   Resolves L and K coefficients analytically for eccentric loads.
+   Fully-compressed case: exact formula.  Partial-uplift: bisection.
+   Reference: PIP STE03350 Figure B / Table 2                       */
+
+/** Width of a regular octagon (flat direction, across-flats = D) at height y.
+ *  For |y| ≤ h₁ = (√2−1)D/2 the full width D applies; then tapers linearly
+ *  to (√2−1)D at the flat faces y = ±D/2.                          */
+function octWFlat(y: number, D: number): number {
+  const ay = Math.abs(y);
+  if (ay <= D / 2) return Math.SQRT2 * D - 2 * ay;   // valid for full range
+  return 0;
+}
+
+/** Width of the octagon cut perpendicular to its diagonal axis at height yp.
+ *  The diagonal axis points toward a vertex (22.5° from flat axis).
+ *  Far vertex is at yp = D/(2·cos22.5°) ≈ 0.5412·D.               */
+function octWDiag(yp: number, D: number): number {
+  const c = Math.cos(Math.PI / 8), s = Math.sin(Math.PI / 8);
+  const Dq = D / Math.SQRT2, cd = c - s, cs = c + s;
+  const b1l = (s * yp - D / 2) / c, b1h = (s * yp + D / 2) / c;
+  const b2l = (-D / 2 - c * yp) / s, b2h = (D / 2 - c * yp) / s;
+  const b3l = (-Dq - cd * yp) / cs,  b3h = (Dq - cd * yp) / cs;
+  const b4l = (-Dq + cs * yp) / cd,  b4h = (Dq + cs * yp) / cd;
+  return Math.max(0, Math.min(b1h, b2h, b3h, b4h) - Math.max(b1l, b2l, b3l, b4l));
+}
+
+/** Numerically integrate A = ∫w·dy, S = ∫w·y·dy, I2 = ∫w·y²·dy
+ *  over the compressed zone [y_n, y_far] using 300 strips.          */
+function octIntegrals(
+  y_n: number, y_far: number, D: number,
+  wFn: (y: number, D: number) => number
+) {
+  const N = 300, dy = (y_far - y_n) / N;
+  let A = 0, S = 0, I2 = 0;
+  for (let i = 0; i < N; i++) {
+    const y = y_n + (i + 0.5) * dy;
+    const w = wFn(y, D);
+    A += w * dy; S += w * y * dy; I2 += w * y * y * dy;
+  }
+  return { A, S, I2 };
+}
+
+/** Solve L and K for an octagonal footing under eccentric load e (ft).
+ *  dir='flat': axis toward flat face  — kern = 0.132·D, y_far = D/2
+ *  dir='diag': axis toward vertex      — kern = 0.122·D, y_far ≈ 0.541·D
+ *
+ *  Returns { L, K, compLen } where:
+ *    L       = q_max·A_oct / P  (bearing-pressure coefficient)
+ *    K       = (y_n + D/2)/D   (neutral-axis position ratio, 0 when fully compressed)
+ *    compLen = length of compression zone from far edge to neutral axis (ft) */
+function solveLK(e: number, D: number, dir: 'flat' | 'diag'): { L: number; K: number; compLen: number } {
+  if (!isFinite(e) || e <= 0) return { L: 1, K: 0, compLen: D };
+  const c8    = Math.cos(Math.PI / 8);
+  const y_far = dir === 'flat' ? D / 2 : D / (2 * c8);   // far-edge distance
+  const kern  = dir === 'flat' ? 0.132 * D : 0.122 * D;  // kern eccentricity
+  const A_oct = 0.8284 * D * D;
+  const wFn   = dir === 'flat' ? octWFlat : octWDiag;
+
+  if (e <= kern) {
+    // Fully compressed — exact closed form: L = 1 + e/kern, K = 0
+    return { L: 1 + e / kern, K: 0, compLen: y_far };
+  }
+  if (e >= y_far * 0.998) return { L: 999, K: 0.98, compLen: D * 0.02 };
+
+  // Partial uplift — bisect on neutral-axis position y_n
+  // e_computed = (I2 − y_n·S) / (S − y_n·A) — increases monotonically with y_n
+  let lo = -y_far, hi = y_far * 0.995;
+  for (let iter = 0; iter < 64; iter++) {
+    const yn = (lo + hi) / 2;
+    const { A, S, I2 } = octIntegrals(yn, y_far, D, wFn);
+    const den = S - yn * A;
+    if (Math.abs(den) < 1e-10) { lo = yn; continue; }
+    const ec = (I2 - yn * S) / den;
+    if (Math.abs(ec - e) < 1e-6) break;
+    if (ec < e) lo = yn; else hi = yn;
+  }
+  const yn = (lo + hi) / 2;
+  const { A, S } = octIntegrals(yn, y_far, D, wFn);
+  const den     = S - yn * A;
+  const compLen = y_far - yn;
+  const L       = Math.abs(den) > 1e-10 ? A_oct * compLen / den : 999;
+  const K       = Math.max(0, Math.min(1, 0.5 + yn / D));
+  return { L: Math.max(1, L), K, compLen };
+}
+
+/* ─── ACI 318-05 Appendix D anchor breakout ──────────────────────── */
+
+/** Per-bolt projected area A_N (in²) — ACI D.5.2 rectangular approximation.
+ *  Arc spacing s_arc = π·BC/Nb; effective width = min(s_arc, 3·hef). */
+function calcAN(BC_in: number, Nb: number, hef_in: number): number {
+  const s_arc = Math.PI * BC_in / Nb;
+  return Math.min(s_arc, 3 * hef_in) * 3 * hef_in;
+}
+
+/** φNn per bolt (kip) — ACI 318-05 Eq. D-7 (cast-in headed bolts).
+ *  φNn = φ · (A_N/A_Nco) · ψc · Nb_basic
+ *  where Nb_basic = kc · √fc · hef^1.5 / 1000  (kc = 24 cast-in)   */
+function calcPhiNn(
+  A_N: number, hef_in: number, fc: number,
+  phi_a: number, psi_c: number, kc: number
+): number {
+  const A_Nco  = 9 * hef_in * hef_in;
+  const Nb_kip = kc * Math.sqrt(fc) * Math.pow(hef_in, 1.5) / 1000;
+  return phi_a * (A_N / A_Nco) * psi_c * Nb_kip;
+}
+
+/* ─── Computed-value display helpers ─────────────────────────────── */
+
+/** Computed result badge — green, same height as amber NumInput */
+function CalcVal({ v, dec = 3 }: { v: number; dec?: number }) {
+  return (
+    <span style={{
+      display: 'inline-block', padding: '1px 8px', borderRadius: 2,
+      background: '#e4f5e4', border: '1px solid #2a7a2a',
+      color: '#145a14', fontWeight: 700, fontFamily: 'Consolas, monospace',
+      fontSize: '9.5pt', minWidth: 48, textAlign: 'center', verticalAlign: 'middle',
+    }}>{fmt(v, dec)}</span>
+  );
+}
+
+/** Toggle button — switches between equation-auto and manual-chart modes */
+function CalcToggle({ useCalc, onToggle, label }: {
+  useCalc: boolean; onToggle: () => void; label: string;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8,
+                  margin: '5px 0 3px 24px' }}>
+      <button
+        onClick={onToggle}
+        style={{
+          padding: '2px 14px', borderRadius: 10, cursor: 'pointer',
+          fontSize: 10, fontWeight: 700, fontFamily: 'Arial, sans-serif',
+          border: useCalc ? '1.5px solid #2a7a2a' : '1.5px solid #b06000',
+          background: useCalc ? '#d8f2d8' : '#fff3d8',
+          color: useCalc ? '#145a14' : '#804000',
+          transition: 'all 0.15s',
+        }}
+      >
+        {useCalc ? '⚡ Equations (click for manual)' : '📊 Manual / Chart (click for equations)'}
+      </button>
+      <span style={{ fontSize: 9, color: '#777', fontStyle: 'italic' }}>{label}</span>
+    </div>
+  );
+}
+
 /* ─── layout & style components ──────────────────────────────── */
 function InputVar({ children }: { children: React.ReactNode }) {
   return <span className="mc-input-var">{children}</span>;
@@ -189,6 +335,15 @@ export default function FoundationCalc() {
   const [L_str_emp,  setL_str_emp]  = useState(7.63);
   const [K_str_emp,  setK_str_emp]  = useState(0.660);
 
+  /* ── Calculation-mode toggles ─────────────────────────────────── */
+  const [useCalcL,  setUseCalcL]  = useState(false); // bearing L/K coefficients
+  const [useCalcAN, setUseCalcAN] = useState(false); // ACI anchor breakout
+
+  /* ── ACI D.5.2 parameters (editable when anchor equations active) */
+  const [kc_anc,  setKc_anc]  = useState(24);    // kc = 24 for cast-in headed
+  const [psi_c_N, setPsi_c_N] = useState(1.25);  // ψc,N — Condition A
+  const [phi_anc, setPhi_anc] = useState(0.75);  // φ — Condition A
+
   /* ── Reinforcement ────────────────────────────────────────── */
   const [cover,       setCover]       = useState(3);      // in
   const [d_bar_rebar, setD_bar_rebar] = useState(1.125);  // in
@@ -259,15 +414,35 @@ export default function FoundationCalc() {
   const Po = Do + Ds;
   const Pt = Dt + Ds;
 
+  /* ── Equation-based L/K coefficients (octagon solver) ─────────── */
+  const lk_emp_calc  = solveLK(Mftg / Pe,                   D_oct, 'diag');
+  const lk_op_calc   = solveLK(Mftg / Po,                   D_oct, 'diag');
+  const lk_s_op_calc = solveLK((1.6 * Mftg) / (1.2 * (Do + (A_ped * (h_ped * gamma_conc - (depth_ftg - t_ftg) * gamma_soil) + A_oct * (t_ftg * gamma_conc + (depth_ftg - t_ftg) * gamma_soil)))), D_oct, 'flat');
+  const lk_s_em_calc = solveLK((1.6 * Mftg) / (0.9 * Pe),  D_oct, 'flat');
+
+  // _u = "used" — either from equation or manual state, based on toggle
+  const L_emp_u  = useCalcL ? lk_emp_calc.L  : L_emp_diag;
+  const L_op_u   = useCalcL ? lk_op_calc.L   : L_op_diag;
+  const L_sop_u  = useCalcL ? lk_s_op_calc.L : L_str_op;
+  const K_sop_u  = useCalcL ? lk_s_op_calc.K : K_str_op;
+  const L_sem_u  = useCalcL ? lk_s_em_calc.L : L_str_emp;
+  const K_sem_u  = useCalcL ? lk_s_em_calc.K : K_str_emp;
+
+  /* ── ACI D.5.2 anchor breakout (equation-based) ────────────────── */
+  const A_N_calc_val   = calcAN(BC_in, Nb, hef_in);
+  const A_N_u          = useCalcAN ? A_N_calc_val : A_N;
+  const phi_Nn_calc_val = calcPhiNn(A_N_u, hef_in, fc, phi_anc, psi_c_N, kc_anc);
+  const phi_Nn_u       = useCalcAN ? phi_Nn_calc_val : phi_Nn_val;
+
   /* Soil bearing */
   const e_emp  = Mftg / Pe;
   const SR_emp = D_oct / (2 * e_emp);
   const eD_emp = e_emp / D_oct;
-  const f_emp  = L_emp_diag * Pe / A_oct;
+  const f_emp  = L_emp_u * Pe / A_oct;
 
   const e_op  = Mftg / Po;
   const eD_op = e_op / D_oct;
-  const f_op  = L_op_diag * Po / A_oct;
+  const f_op  = L_op_u * Po / A_oct;
 
   const V_partial_frac = Math.pow(V_partial_mph / V_design_mph, 2);
   const Mftg_test = V_partial_frac * Mftg;
@@ -280,8 +455,8 @@ export default function FoundationCalc() {
   const Mu_str_op = 1.6 * Mftg;
   const e_str_op  = Mu_str_op / Pu_op;
   const eD_str_op = e_str_op / D_oct;
-  const KD_str_op = K_str_op * D_oct;
-  const SB_str_op = L_str_op * Pu_op / A_oct;
+  const KD_str_op = K_sop_u * D_oct;
+  const SB_str_op = L_sop_u * Pu_op / A_oct;
   const side_equiv         = Math.sqrt(A_ped);
   const proj               = (D_oct - side_equiv) / 2;
   const dist_from_far_edge_op = D_oct - KD_str_op;
@@ -295,8 +470,8 @@ export default function FoundationCalc() {
   const Mu_str_emp  = 1.6 * Mftg;
   const e_str_emp   = Mu_str_emp / Pu_emp_str;
   const eD_str_emp  = e_str_emp / D_oct;
-  const KD_str_emp  = K_str_emp * D_oct;
-  const SB_str_emp  = L_str_emp * Pu_emp_str / A_oct;
+  const KD_str_emp  = K_sem_u * D_oct;
+  const SB_str_emp  = L_sem_u * Pu_emp_str / A_oct;
   const comp_len_emp = D_oct - KD_str_emp;
   const SB_face_emp  = SB_str_emp * (comp_len_emp - proj) / comp_len_emp;
   const SC_emp       = 0.9 * W_ftg_soil / A_oct;
@@ -920,7 +1095,7 @@ export default function FoundationCalc() {
             <rect x="103" y="53" width="54" height="54" fill="#d0e8ff" stroke="#1a5fa8" strokeWidth={1} opacity={0.7} />
             <text x="108" y="82" fill="#1a3a8f" fontSize="7.5" fontWeight="bold">A</text>
             <text x="115" y="82" fill="#1a3a8f" fontSize="6.5">N</text>
-            <text x="118" y="82" fill="#1a3a8f" fontSize="7.5"> = {A_N.toLocaleString()} in²</text>
+            <text x="118" y="82" fill="#1a3a8f" fontSize="7.5"> = {A_N_u.toLocaleString()} in²</text>
             <line x1="75" y1="53" x2="75" y2="107" stroke="#e06020" strokeWidth={0.8} />
             <text x="54" y="83" fill="#e06020" fontSize="7.5">{fmt(BC_in/Nb,0)} in</text>
             <line x1="103" y1="130" x2="157" y2="130" stroke="#e06020" strokeWidth={0.8} />
@@ -928,18 +1103,67 @@ export default function FoundationCalc() {
           </svg>
         </div>
 
+        <CalcToggle
+          useCalc={useCalcAN}
+          onToggle={() => setUseCalcAN(v => !v)}
+          label={useCalcAN
+            ? "A_N and φNn computed from ACI 318-05 Appendix D.5.2 equations — click for manual entry"
+            : "A_N from graphical layout, φNn from spreadsheet — click to use ACI D.5.2 equations"}
+        />
+
+        {useCalcAN && (
+          <div style={{ marginLeft: 24, marginBottom: 6, border: '1px solid #2a7a2a',
+                        background: '#f0f8f0', padding: '6px 10px', borderRadius: 3,
+                        fontSize: '8.5pt', fontFamily: 'Arial, sans-serif', color: '#1a4a1a' }}>
+            <strong>ACI 318-05 D.5.2 parameters:</strong>&nbsp;
+            k<sub>c</sub>&nbsp;=&nbsp;<N value={kc_anc} set={setKc_anc} w={40} />&nbsp;
+            ψ<sub>c,N</sub>&nbsp;=&nbsp;<N value={psi_c_N} set={setPsi_c_N} w={45} />&nbsp;
+            φ&nbsp;=&nbsp;<N value={phi_anc} set={setPhi_anc} w={40} />&nbsp;
+            <span style={{ marginLeft: 8, fontSize: '7.5pt', color: '#555' }}>
+              (k<sub>c</sub>=24 cast-in; ψ<sub>c</sub>=1.25 Cond. A; φ=0.75 Cond. A)
+            </span>
+          </div>
+        )}
+
         <Row indent={1}>
-          <InputVar>A<Sub>N</Sub></InputVar><Assign />
-          <N value={A_N} set={setA_N} w={70} /><Unit>in²</Unit>
-          <Cmt>from graphical/CAD layout</Cmt>
+          {useCalcAN ? <Var>A<Sub>N</Sub></Var> : <InputVar>A<Sub>N</Sub></InputVar>}<Assign />
+          {useCalcAN ? (
+            <><CalcVal v={A_N_calc_val} dec={0} /><Unit>in²</Unit>
+              <Cmt>⚡ ACI D.5.2: min(s_arc, 3·h<sub>ef</sub>)·3·h<sub>ef</sub> = min({fmt(Math.PI*BC_in/Nb,1)}, {fmt(3*hef_in,0)})·{fmt(3*hef_in,0)}</Cmt></>
+          ) : (
+            <><N value={A_N} set={setA_N} w={70} /><Unit>in²</Unit><Cmt>from graphical/CAD layout</Cmt></>
+          )}
         </Row>
+
+        {useCalcAN && (
+          <Row indent={1}>
+            <Var>A<Sub>Nco</Sub></Var><Assign />
+            <span className="mc-expr">9·h<Sub>ef</Sub>² = 9·{hef_in}² </span>
+            <Eq /><Res>{fmt(9*hef_in*hef_in,0)}</Res><Unit>in²</Unit>
+            <Cmt>single anchor reference area, ACI Eq. D-6</Cmt>
+          </Row>
+        )}
+        {useCalcAN && (
+          <Row indent={1}>
+            <Var>N<Sub>b</Sub></Var><Assign />
+            <span className="mc-expr">{kc_anc}·√f'<Sub>c</Sub>·h<Sub>ef</Sub><Sup>1.5</Sup> = {kc_anc}·√{fc}·{hef_in}<Sup>1.5</Sup></span>
+            <Eq /><Res>{fmt(kc_anc*Math.sqrt(fc)*Math.pow(hef_in,1.5)/1000,1)}</Res><Unit>kip</Unit>
+            <Cmt>basic breakout, ACI Eq. D-7</Cmt>
+          </Row>
+        )}
+
         <Row indent={1}>
-          <InputVar>φN<Sub>n</Sub></InputVar><Assign />
-          <N value={phi_Nn_val} set={setPhi_Nn_val} w={60} /><Unit>kip</Unit>
+          {useCalcAN ? <Var>φN<Sub>n</Sub></Var> : <InputVar>φN<Sub>n</Sub></InputVar>}<Assign />
+          {useCalcAN ? (
+            <><CalcVal v={phi_Nn_calc_val} dec={1} /><Unit>kip</Unit>
+              <Cmt>⚡ φ·(A<sub>N</sub>/A<sub>Nco</sub>)·ψ<sub>c</sub>·N<sub>b</sub> = {fmt(phi_anc,2)}·({fmt(A_N_u,0)}/{fmt(9*hef_in*hef_in,0)})·{fmt(psi_c_N,2)}·{fmt(kc_anc*Math.sqrt(fc)*Math.pow(hef_in,1.5)/1000,1)}</Cmt></>
+          ) : (
+            <><N value={phi_Nn_val} set={setPhi_Nn_val} w={60} /><Unit>kip</Unit></>
+          )}
           <span style={{ fontWeight: "bold", marginLeft: 6 }}>{">"}</span>
           <span className="mc-expr" style={{ marginLeft: 4 }}>N<Sub>u</Sub> = {fmt(Nu,1)} kip</span>
-          <Check pass={phi_Nn_val > Nu} />
-          <Ref>PIP Anchor Bolt Design Spreadsheet / ACI 318-05 App. D</Ref>
+          <Check pass={phi_Nn_u > Nu} />
+          <Ref>ACI 318-05 App. D</Ref>
         </Row>
 
         <SubHeader>Bolt Length</SubHeader>
@@ -1125,6 +1349,14 @@ export default function FoundationCalc() {
           bearing area is not fully in compression; use Figure B (PIP STE03350) to find coefficient L.
           Maximum bearing pressure: f = L·P/A. Stability ratio: SR = D/(2e) ≥ 1.5.</Text>
 
+        <CalcToggle
+          useCalc={useCalcL}
+          onToggle={() => setUseCalcL(v => !v)}
+          label={useCalcL
+            ? "L and K auto-computed via octagon bisection (exact numerical solution, PIP Figure B equivalent)"
+            : "L values entered manually from PIP Figure B chart or Table 2 — click to auto-compute"}
+        />
+
         <Divider />
         <SubHeader>Case 1 — Empty + Wind (Load Combination 3, Table 3, PIP STC01015)</SubHeader>
 
@@ -1156,13 +1388,15 @@ export default function FoundationCalc() {
           <span style={{ marginLeft: 8 }}>{">"} 0.122 → footing not fully in compression → use Figure B</span>
         </Row>
         <Row indent={1}>
-          <InputVar>L</InputVar><Assign />
-          <N value={L_emp_diag} set={setL_emp_diag} w={55} />
-          <Ref>coefficient from Figure B, PIP STE03350 (e/D = {fmt(eD_emp,3)})</Ref>
+          {useCalcL ? <Var>L</Var> : <InputVar>L</InputVar>}<Assign />
+          {useCalcL
+            ? <><CalcVal v={lk_emp_calc.L} /><Cmt>⚡ octagon bisection — {eD_emp > 0.122 ? 'partial uplift' : 'fully compressed'}, e/D = {fmt(eD_emp,3)}</Cmt></>
+            : <><N value={L_emp_diag} set={setL_emp_diag} w={55} /><Ref>coefficient from Figure B, PIP STE03350 (e/D = {fmt(eD_emp,3)})</Ref></>
+          }
         </Row>
         <Row indent={1}>
           <Var>f</Var><Assign />
-          <span className="mc-expr">L·P/A = {L_emp_diag}({fmt(Pe,1)})/{A_oct}</span>
+          <span className="mc-expr">L·P/A = {fmt(L_emp_u,3)}({fmt(Pe,1)})/{A_oct}</span>
           <Eq /><Res>{fmt(f_emp,2)}</Res><Unit>ksf</Unit>
           <span style={{ marginLeft: 6 }}>{"<"}</span>
           <span className="mc-expr" style={{ marginLeft: 4 }}>SB<Sub>gross</Sub> = {fmt(SB_gross,2)} ksf</span>
@@ -1192,13 +1426,15 @@ export default function FoundationCalc() {
           <span style={{ marginLeft: 8 }}>{">"} 0.122 → use Figure B</span>
         </Row>
         <Row indent={1}>
-          <InputVar>L</InputVar><Assign />
-          <N value={L_op_diag} set={setL_op_diag} w={55} />
-          <Ref>Figure B (e/D = {fmt(eD_op,3)})</Ref>
+          {useCalcL ? <Var>L</Var> : <InputVar>L</InputVar>}<Assign />
+          {useCalcL
+            ? <><CalcVal v={lk_op_calc.L} /><Cmt>⚡ octagon bisection — {eD_op > 0.122 ? 'partial uplift' : 'fully compressed'}, e/D = {fmt(eD_op,3)}</Cmt></>
+            : <><N value={L_op_diag} set={setL_op_diag} w={55} /><Ref>Figure B (e/D = {fmt(eD_op,3)})</Ref></>
+          }
         </Row>
         <Row indent={1}>
           <Var>f</Var><Assign />
-          <span className="mc-expr">L·P<Sub>o</Sub>/A<Sub>oct</Sub> = {L_op_diag}({fmt(Po,1)})/{A_oct}</span>
+          <span className="mc-expr">L·P<Sub>o</Sub>/A<Sub>oct</Sub> = {fmt(L_op_u,3)}({fmt(Po,1)})/{A_oct}</span>
           <Eq /><Res>{fmt(f_op,2)}</Res><Unit>ksf</Unit>
           <span style={{ marginLeft: 6 }}>{"<"} {fmt(SB_gross,2)} ksf</span>
           <Check pass={f_op <= SB_gross} />
@@ -1250,6 +1486,14 @@ export default function FoundationCalc() {
           Figure B (PIP STE03350). KD = K·D<Sub>oct</Sub> is the distance from the low-pressure edge to the
           zero-pressure line. Compression zone = D<Sub>oct</Sub> − KD from the high-pressure edge.</Text>
 
+        <CalcToggle
+          useCalc={useCalcL}
+          onToggle={() => setUseCalcL(v => !v)}
+          label={useCalcL
+            ? "L, K auto-computed via octagon bisection solver (flat direction)"
+            : "L, K entered manually from PIP Table 2 / Figure B — click to auto-compute"}
+        />
+
         <Divider />
         <SubHeader>Case A — Operating + Wind (Load Comb. 3: 1.2(D<Sub>s</Sub>+D<Sub>o</Sub>) + 1.6W)</SubHeader>
 
@@ -1275,18 +1519,24 @@ export default function FoundationCalc() {
           <span style={{ marginLeft: 8 }}>{">"} 0.132 (flat) → Table 2 / Figure B</span>
         </Row>
         <Row indent={1}>
-          <InputVar>L</InputVar><Assign /><N value={L_str_op} set={setL_str_op} w={55} />
-          <span style={{ marginLeft: 16 }}><InputVar>K</InputVar><Assign /><N value={K_str_op} set={setK_str_op} w={60} /></span>
-          <Ref>(flat, Table 2 / Figure B, e/D = {fmt(eD_str_op,3)})</Ref>
+          {useCalcL ? <Var>L</Var> : <InputVar>L</InputVar>}<Assign />
+          {useCalcL
+            ? <><CalcVal v={lk_s_op_calc.L} dec={3} /></>
+            : <N value={L_str_op} set={setL_str_op} w={55} />}
+          <span style={{ marginLeft: 16 }}>{useCalcL ? <Var>K</Var> : <InputVar>K</InputVar>}<Assign />
+          {useCalcL
+            ? <><CalcVal v={lk_s_op_calc.K} dec={3} /><Cmt>⚡ octagon bisection — flat, e/D = {fmt(eD_str_op,3)}</Cmt></>
+            : <><N value={K_str_op} set={setK_str_op} w={60} /><Ref>(flat, Table 2 / Figure B, e/D = {fmt(eD_str_op,3)})</Ref></>}
+          </span>
         </Row>
         <Row indent={1}>
           <Var>KD</Var><Assign />
-          <span className="mc-expr">K × D<Sub>oct</Sub> = {K_str_op} × {D_oct}</span>
+          <span className="mc-expr">K × D<Sub>oct</Sub> = {fmt(K_sop_u,3)} × {D_oct}</span>
           <Eq /><Res>{fmt(KD_str_op,2)}</Res><Unit>ft</Unit>
         </Row>
         <Row indent={1}>
           <Var>SB</Var><Assign />
-          <span className="mc-expr">L·P<Sub>u</Sub>/A<Sub>oct</Sub> = {L_str_op}({fmt(Pu_op,1)})/{A_oct}</span>
+          <span className="mc-expr">L·P<Sub>u</Sub>/A<Sub>oct</Sub> = {fmt(L_sop_u,3)}({fmt(Pu_op,1)})/{A_oct}</span>
           <Eq /><Res>{fmt(SB_str_op,2)}</Res><Unit>ksf</Unit>
         </Row>
         <Row indent={1}>
@@ -1393,18 +1643,24 @@ export default function FoundationCalc() {
           <span style={{ marginLeft: 8 }}>{">"} 0.132 (flat) → Table 2</span>
         </Row>
         <Row indent={1}>
-          <InputVar>L</InputVar><Assign /><N value={L_str_emp} set={setL_str_emp} w={55} />
-          <span style={{ marginLeft: 16 }}><InputVar>K</InputVar><Assign /><N value={K_str_emp} set={setK_str_emp} w={60} /></span>
-          <Ref>(flat, Table 2, e/D = {fmt(eD_str_emp,3)})</Ref>
+          {useCalcL ? <Var>L</Var> : <InputVar>L</InputVar>}<Assign />
+          {useCalcL
+            ? <><CalcVal v={lk_s_em_calc.L} dec={3} /></>
+            : <N value={L_str_emp} set={setL_str_emp} w={55} />}
+          <span style={{ marginLeft: 16 }}>{useCalcL ? <Var>K</Var> : <InputVar>K</InputVar>}<Assign />
+          {useCalcL
+            ? <><CalcVal v={lk_s_em_calc.K} dec={3} /><Cmt>⚡ octagon bisection — flat, e/D = {fmt(eD_str_emp,3)}</Cmt></>
+            : <><N value={K_str_emp} set={setK_str_emp} w={60} /><Ref>(flat, Table 2, e/D = {fmt(eD_str_emp,3)})</Ref></>}
+          </span>
         </Row>
         <Row indent={1}>
           <Var>KD</Var><Assign />
-          <span className="mc-expr">K × D<Sub>oct</Sub> = {K_str_emp} × {D_oct}</span>
+          <span className="mc-expr">K × D<Sub>oct</Sub> = {fmt(K_sem_u,3)} × {D_oct}</span>
           <Eq /><Res>{fmt(KD_str_emp,2)}</Res><Unit>ft</Unit>
         </Row>
         <Row indent={1}>
           <Var>SB</Var><Assign />
-          <span className="mc-expr">L·P<Sub>u</Sub>/A<Sub>oct</Sub> = {L_str_emp}({fmt(Pu_emp_str,1)})/{A_oct}</span>
+          <span className="mc-expr">L·P<Sub>u</Sub>/A<Sub>oct</Sub> = {fmt(L_sem_u,3)}({fmt(Pu_emp_str,1)})/{A_oct}</span>
           <Eq /><Res>{fmt(SB_str_emp,2)}</Res><Unit>ksf</Unit>
         </Row>
 
