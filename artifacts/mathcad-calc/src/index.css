@@ -178,6 +178,59 @@
   font-family: 'Arial', sans-serif;
 }
 
+.mc-ng {
+  color: #b00000;
+  font-weight: bold;
+  font-size: 9pt;
+  border: 1px solid #b00000;
+  background: #fff0f0;
+  padding: 0 5px;
+  margin-left: 6px;
+  font-family: 'Arial', sans-serif;
+}
+
+/* Editable number input — matches mc-input-var amber styling */
+.mc-num-input {
+  color: #9a6700;
+  font-style: italic;
+  font-size: 10pt;
+  font-family: 'Times New Roman', serif;
+  background: #fffbe8;
+  border: 1px solid #d4aa30;
+  border-radius: 2px;
+  padding: 0 4px;
+  text-align: right;
+  outline: none;
+  -moz-appearance: textfield;
+}
+.mc-num-input::-webkit-outer-spin-button,
+.mc-num-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.mc-num-input:focus {
+  border-color: #9a6700;
+  background: #fff7cc;
+  box-shadow: 0 0 0 2px rgba(154,103,0,0.15);
+}
+
+/* Editable text input for project info */
+.mc-text-input {
+  font-size: 10pt;
+  font-family: 'Arial', sans-serif;
+  color: #1a3a6e;
+  border: 1px solid #c0d0e8;
+  border-radius: 2px;
+  padding: 1px 5px;
+  background: #f4f8ff;
+  outline: none;
+}
+.mc-text-input:focus {
+  border-color: #1a5fa8;
+  background: #eef5fc;
+  box-shadow: 0 0 0 2px rgba(26,95,168,0.12);
+}
+
 .mc-unit {
   color: #444;
   font-size: 9pt;
